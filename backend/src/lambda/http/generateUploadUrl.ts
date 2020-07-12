@@ -2,11 +2,14 @@ import 'source-map-support/register'
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayProxyHandler } from 'aws-lambda'
 import * as AWS  from 'aws-sdk'
+import * as AWSXRay from 'aws-xray-sdk'
+
 import { getUserId } from '../utils'
 import * as uuid from 'uuid'
 
-const docClient = new AWS.DynamoDB.DocumentClient()
-const s3 = new AWS.S3({
+const XAWS = AWSXRay.captureAWS(AWS)
+const docClient = new XAWS.DynamoDB.DocumentClient()
+const s3 = new XAWS.S3({
   signatureVersion: 'v4'
 })
 
@@ -31,8 +34,15 @@ export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEven
   }
 
   const imageId: string = uuid.v4()
-  const url: string = getUploadUrl(imageId)
-  console.log('Attachment url: ', url)
+  const presignedUrl: string = getUploadUrl(imageId)
+  const imageUrl = `https://${bucketName}.s3.amazonaws.com/${imageId}`
+  console.log('Attachment url: ', imageUrl)
+
+  try {
+    await UpdateUrl(userId, todoId, imageUrl)
+  } catch(e) {
+    console.log("Update failed", e.message)
+  }
 
   return {
     statusCode: 201,
@@ -42,7 +52,7 @@ export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEven
     },
     body: JSON.stringify({
       todoId,
-      uploadUrl: url
+      uploadUrl: presignedUrl
     })
   }
 }
@@ -60,6 +70,24 @@ async function toDoExists(userId: string, todoId: string): Promise<boolean> {
 
   console.log('Get group: ', result)
   return !!result.Item
+}
+
+async function UpdateUrl(userId: string, todoId: string, url: string): Promise<boolean> {
+  console.log("Updating url")
+  const result = await docClient
+  .update({
+    TableName: ToDoTable,
+    Key: {
+      "userId": userId,
+      "todoId": todoId
+    },
+    UpdateExpression: "set attachmentUrl = :a",
+    ExpressionAttributeValues:{
+        ":a": url
+    },
+    ReturnValues:"ALL_NEW"
+  }).promise()
+  return !!result
 }
 
 function getUploadUrl(imageId: string): string {
