@@ -1,10 +1,71 @@
 import 'source-map-support/register'
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayProxyHandler } from 'aws-lambda'
+import * as AWS  from 'aws-sdk'
+import { getUserId } from '../utils'
+import * as uuid from 'uuid'
+
+const docClient = new AWS.DynamoDB.DocumentClient()
+const s3 = new AWS.S3({
+  signatureVersion: 'v4'
+})
+
+const ToDoTable = process.env.TODO_TABLE
+const bucketName = process.env.IMAGES_S3_BUCKET
+const urlExpiration = process.env.SIGNED_URL_EXPIRATION
 
 export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  console.log('Processing event: ', event)
   const todoId = event.pathParameters.todoId
+  const userId: string = getUserId(event)
 
-  // TODO: Return a presigned URL to upload a file for a TODO item with the provided id
-  return undefined
+  const validToDoId = await toDoExists(userId, todoId)
+
+  if (!validToDoId) {
+    return {
+      statusCode: 404,
+      body: JSON.stringify({
+        error: 'ToDo does not exist'
+      })
+    }
+  }
+
+  const imageId: string = uuid.v4()
+  const url: string = getUploadUrl(imageId)
+  console.log('Attachment url: ', url)
+
+  return {
+    statusCode: 201,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Credentials': true
+    },
+    body: JSON.stringify({
+      todoId,
+      uploadUrl: url
+    })
+  }
+}
+
+async function toDoExists(userId: string, todoId: string): Promise<boolean> {
+  const result = await docClient
+    .get({
+      TableName: ToDoTable,
+      Key: {
+        "userId": userId,
+        "todoId": todoId
+      }
+    })
+    .promise()
+
+  console.log('Get group: ', result)
+  return !!result.Item
+}
+
+function getUploadUrl(imageId: string): string {
+  return s3.getSignedUrl('putObject', {
+    Bucket: bucketName,
+    Key: imageId,
+    Expires: urlExpiration
+  })
 }
