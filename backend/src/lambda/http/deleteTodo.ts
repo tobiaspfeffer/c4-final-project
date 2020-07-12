@@ -1,27 +1,19 @@
 import 'source-map-support/register'
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayProxyHandler } from 'aws-lambda'
-import * as AWS  from 'aws-sdk'
 import { getUserId } from '../utils'
+import { deleteToDo } from '../../buisnessLogic/todo'
 
-const docClient = new AWS.DynamoDB.DocumentClient()
-const ToDoTable = process.env.TODO_TABLE
 
 export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   console.log('Processing event: ', event)
   const todoId = event.pathParameters.todoId
-  const user: string = getUserId(event)
+  const userId: string = getUserId(event)
 
   try {
-    await docClient.delete({
-      TableName: ToDoTable,
-      Key: {
-        "userId": user,
-        "todoId": todoId
-      }
-    }).promise()
+    await deleteToDo(userId, todoId)
   } catch(e) {
-    console.log("Update failed", e.message)
+    console.log("Delete failed", e.message)
   }
 
 
